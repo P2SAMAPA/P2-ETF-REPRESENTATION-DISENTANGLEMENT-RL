@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 
 class DisentanglementEncoder(nn.Module):
     """
@@ -107,12 +108,25 @@ class DisentanglementRL:
         return score
 
 def prepare_data(returns, macro_df, seq_len=10):
-    """Prepare sequences for training."""
+    """
+    Prepare sequences for training.
+    returns: pandas Series (single ETF)
+    macro_df: pandas DataFrame (macro variables)
+    """
+    # Ensure returns is a pandas Series
+    if isinstance(returns, np.ndarray):
+        # If it's a numpy array, we need to convert to Series with a dummy index
+        # But we also need the macro_df index to align
+        # This is a fallback - in practice, this shouldn't happen
+        return None, None
+    
     if len(returns) < seq_len + 1:
         return None, None
+    # Align with macro
     common_idx = returns.index.intersection(macro_df.index)
     ret_aligned = returns.loc[common_idx]
     macro_aligned = macro_df.loc[common_idx]
+    # Create sequences
     X, y = [], []
     for i in range(seq_len, len(ret_aligned)):
         ret_seq = ret_aligned.iloc[i-seq_len:i].values.reshape(-1, 1)
@@ -144,10 +158,9 @@ def disentanglement_rl_score(returns, macro_df, latent_dim=8, exo_dim=4, endo_di
             loss = agent.train_step(X_batch, y_batch)
             epoch_loss += loss
     # Compute disentanglement score on the last sequence
-    last_seq = np.concatenate([
-        returns.iloc[-seq_len:].values.reshape(-1, 1),
-        macro_df.iloc[-seq_len:].values
-    ], axis=1)
+    last_ret_seq = returns.iloc[-seq_len:].values.reshape(-1, 1)
+    last_macro_seq = macro_df.iloc[-seq_len:].values
+    last_seq = np.concatenate([last_ret_seq, last_macro_seq], axis=1)
     last_seq_tensor = torch.tensor(last_seq, dtype=torch.float32).unsqueeze(0).to(device)
     score = agent.disentanglement_score(last_seq_tensor)
     return float(score)
